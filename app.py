@@ -1,4 +1,3 @@
-# Energy IQ v2.0 - Marcobre
 import dash
 from dash import dcc, html, Input, Output, dash_table
 import dash_bootstrap_components as dbc
@@ -38,6 +37,38 @@ AREA_COLORS = {
     "Sulfuros":"#1D4ED8","Óxidos":"#9333EA","Infraestructura":"#92400E",
     "Mina":"#15803D","G&A":"#0EA5E9","Mantenimiento":"#6B7280",
 }
+
+
+# ── Filter helpers ────────────────────────────────────────────────────────────
+def filter_panel(page_id, extra_controls=None):
+    """Panel de filtros de año y mes consistente en todas las páginas."""
+    years = sorted(rk["fecha"].dt.year.unique().tolist()) if DATA_OK else list(range(2021,2027))
+    months = [{"label":m,"value":i} for i,m in enumerate(
+        ["Ene","Feb","Mar","Apr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"],1)]
+    controls = [
+        html.Div("Filtros", style={"fontSize":"10px","fontWeight":"700","textTransform":"uppercase",
+            "letterSpacing":".08em","color":"#60A5FA","marginBottom":"10px"}),
+        html.Div("Años", style={"fontSize":"11px","fontWeight":"600","color":"#94A3B8","marginBottom":"4px"}),
+        dcc.Checklist(id=f"{page_id}-years",
+            options=[{"label":f" {y}","value":y} for y in years],
+            value=years,
+            inputStyle={"marginRight":"4px"},
+            labelStyle={"display":"block","fontSize":"12px","color":"#CBD5E1","marginBottom":"3px","cursor":"pointer"}),
+        html.Hr(style={"borderColor":"#1E3A5F","margin":"10px 0"}),
+        html.Div("Meses", style={"fontSize":"11px","fontWeight":"600","color":"#94A3B8","marginBottom":"4px"}),
+        dcc.Checklist(id=f"{page_id}-months",
+            options=months,
+            value=list(range(1,13)),
+            inputStyle={"marginRight":"4px"},
+            labelStyle={"display":"inline-block","fontSize":"12px","color":"#CBD5E1",
+                        "marginBottom":"3px","marginRight":"8px","cursor":"pointer"}),
+    ]
+    if extra_controls:
+        controls += [html.Hr(style={"borderColor":"#1E3A5F","margin":"10px 0"})] + extra_controls
+    return html.Div(controls,
+        style={"background":SIDEBAR,"borderRadius":"10px","padding":"14px","width":"180px",
+               "flexShrink":"0","border":"0.5px solid #1E3A5F","alignSelf":"flex-start",
+               "position":"sticky","top":"0"})
 
 # ── Load data once at startup ─────────────────────────────────────────────────
 def _is_date(v):
@@ -319,6 +350,8 @@ def page_home():
         rows.append({"Área":area,"Real GWh/mes":f"{rv/1e6:.2f}","PPTO GWh/mes":f"{pv/1e6:.2f}","Desv. %":f"{dv:+.1f}%"})
 
     return html.Div([
+        filter_panel("home"),
+        html.Div([
         sec("dashboard",f"Indicadores clave · {latest.strftime('%B %Y')}"),
         html.Div([
             kpi("Consumo real",     f"{total_r/1e6:.2f}","GWh/mes",f"{'↓' if delta<0 else '↑'} {delta:+.1f}% vs PPTO",delta<=0,"#185FA5"),
@@ -357,13 +390,16 @@ def page_home():
                 {"if":{"filter_query":'{Desv. %} contains "-"',"column_id":"Desv. %"},"color":"#16A34A","fontWeight":"700"},
             ],style_table={"borderRadius":"10px","overflow":"hidden"}),
             style=CARD_STYLE),
-    ])
+        ],style={"flex":"1","minWidth":"0"}),
+    ],style={"display":"flex","gap":"14px","alignItems":"flex-start"})
 
 def page_ratios():
     RATIO_LABELS={"PLANTA SULFUROS_ratio":"Sulfuros (kWh/tt Sulf)",
         "UNITARIO TOTAL":"Unitario Total (kWh/tt)","INFRAESTRUCTURA_ratio":"Infraestructura (kWh/m³)",
         "OXIDOS_EW_ratio":"Óxidos EW (kWh/tt Óxi)","OXIDOS_SECO_ratio":"Óxidos Seco (kWh/tt Óxi)"}
     return html.Div([
+        filter_panel("ratios"),
+        html.Div([
         sec("math-function","Ratios unitarios — Presupuesto vs Real"),
         html.Div([
             html.Div("Ratio a analizar",style={"fontSize":"11px","fontWeight":"700","color":"#94A3B8","marginBottom":"6px"}),
@@ -371,7 +407,8 @@ def page_ratios():
                 value="PLANTA SULFUROS_ratio",clearable=False),
         ],style={**CARD_STYLE,"marginBottom":"12px"}),
         html.Div(id="ratio-out"),
-    ])
+        ],style={"flex":"1","minWidth":"0"}),
+    ],style={"display":"flex","gap":"14px","alignItems":"flex-start"})
 
 def page_areas():
     trend_r=rk.groupby(["fecha","area"])["kwh_real"].sum().reset_index()
@@ -414,6 +451,8 @@ def page_areas():
     for area in areas]
 
     return html.Div([
+        filter_panel("areas"),
+        html.Div([
         sec("layers","Desglose por área operativa"),
         html.Div(kpis,style={"display":"flex","gap":"8px","marginBottom":"14px","flexWrap":"wrap"}),
         sec("trending-up","Evolución mensual"),
@@ -428,7 +467,8 @@ def page_areas():
         sec("chart-area","Distribución — último mes"),
         html.Div(dcc.Graph(figure=px.treemap(rk[rk["fecha"]==rk["fecha"].max()],path=["area"],values="kwh_real",
             color="area",color_discrete_map=AREA_COLORS),config={"displayModeBar":False}),style=CARD_STYLE),
-    ])
+        ],style={"flex":"1","minWidth":"0"}),
+    ],style={"display":"flex","gap":"14px","alignItems":"flex-start"})
 
 def page_factura():
     bill_mo=bill.groupby(["fecha","area"])["usd"].sum().reset_index()
@@ -459,6 +499,8 @@ def page_factura():
     layout_fig(fig3,260); fig3.update_layout(yaxis_title="USD/MWh")
 
     return html.Div([
+        filter_panel("factura"),
+        html.Div([
         sec("coin","Facturación energética"),
         html.Div([
             kpi("Facturación acumulada",f"${bill['usd'].sum()/1e6:.1f}M","USD",accent="#185FA5"),
@@ -474,10 +516,13 @@ def page_factura():
             dcc.Tab(label="Costo USD/MWh",children=[html.Div(dcc.Graph(figure=fig3,config={"displayModeBar":False}),style=CARD_STYLE)],
                 style={"color":MUTED,"fontWeight":"600"},selected_style={"color":ACCENT,"fontWeight":"700","borderTop":f"3px solid {ACCENT}"}),
         ]),
-    ])
+    ],style={"flex":"1","minWidth":"0"}),
+    ],style={"display":"flex","gap":"14px","alignItems":"flex-start"})
 
 def page_lom():
     return html.Div([
+        filter_panel("lom"),
+        html.Div([
         sec("calendar","Horizonte LOM 2023–2045"),
         html.Div([
             html.Div("Vista",style={"fontSize":"11px","fontWeight":"700","color":"#94A3B8","marginBottom":"6px"}),
@@ -491,7 +536,8 @@ def page_lom():
             ]),
         ],style={**CARD_STYLE,"marginBottom":"12px"}),
         html.Div(id="lom-out"),
-    ])
+        ],style={"flex":"1","minWidth":"0"}),
+    ],style={"display":"flex","gap":"14px","alignItems":"flex-start"})
 
 # ── Callbacks ─────────────────────────────────────────────────────────────────
 @app.callback(Output("page-content","children"),Output("page-title","children"),Input("url","pathname"))
