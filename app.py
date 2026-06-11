@@ -282,16 +282,8 @@ app.layout=html.Div([
     Input("filter-years","value"),
     Input("filter-months","value"))
 def router(path, years_sel, months_sel):
-    # Apply global filters
-    if years_sel is None: years_sel = list(range(2021,2027))
-    if months_sel is None: months_sel = list(range(1,13))
-    global rk, bk, bill, brat, rrat
-    if DATA_OK:
-        rk_f  = rk[rk["fecha"].dt.year.isin(years_sel) & rk["fecha"].dt.month.isin(months_sel)]
-        bk_f  = bk[bk["fecha"].dt.year.isin(years_sel) & bk["fecha"].dt.month.isin(months_sel)]
-        bill_f= bill[bill["fecha"].dt.year.isin(years_sel) & bill["fecha"].dt.month.isin(months_sel)]
-    else:
-        rk_f=rk; bk_f=bk; bill_f=bill
+    if years_sel is None or len(years_sel)==0: years_sel = list(range(2021,2027))
+    if months_sel is None or len(months_sel)==0: months_sel = list(range(1,13))
     pages_map={"/":build_home,"/ratios":build_ratios,"/areas":build_areas,"/factura":build_factura,"/lom":build_lom}
     titles={"/":"Resumen ejecutivo - Superintendencia de Energia","/ratios":"Ratios unitarios",
             "/areas":"Desglose por area operativa","/factura":"Facturacion energetica","/lom":"Horizonte LOM 2023-2045"}
