@@ -156,14 +156,21 @@ def page_home():
     real_mo  = rk.groupby("fecha")["kwh_real"].sum().reset_index().sort_values("fecha")
     bk_mo    = bk[bk["fecha"].isin(BUDGET_DATES)].groupby("fecha")["kwh_ppto"].sum().reset_index().sort_values("fecha")
 
+    # Limitar barras al último mes con datos reales
+    latest_real_fecha = rk["fecha"].max()
+    bk_mo_bar = bk_mo[bk_mo["fecha"] <= latest_real_fecha]
+    real_mo_bar = real_mo[real_mo["fecha"] <= latest_real_fecha]
+
     fig_bar = go.Figure()
-    fig_bar.add_trace(go.Bar(x=bk_mo["fecha"],y=bk_mo["kwh_ppto"]/1e6,
-        name="Presupuesto",marker_color="#93C5FD",opacity=0.75))
-    fig_bar.add_trace(go.Scatter(x=real_mo["fecha"],y=real_mo["kwh_real"]/1e6,
-        name="Real",mode="lines+markers",line=dict(color="#059669",width=2.5),marker_size=4))
+    fig_bar.add_trace(go.Bar(x=bk_mo_bar["fecha"],y=bk_mo_bar["kwh_ppto"]/1e6,
+        name="Presupuesto",marker_color="#93C5FD",opacity=0.8,
+        hovertemplate="<b>PPTO</b> %{x|%b %Y}: %{y:.2f} GWh<extra></extra>"))
+    fig_bar.add_trace(go.Bar(x=real_mo_bar["fecha"],y=real_mo_bar["kwh_real"]/1e6,
+        name="Real",marker_color="#34D399",opacity=0.9,
+        hovertemplate="<b>Real</b> %{x|%b %Y}: %{y:.2f} GWh<extra></extra>"))
     fig_bar.update_layout(
         plot_bgcolor="#FFFFFF",paper_bgcolor="#FFFFFF",height=260,
-        margin=dict(l=0,r=0,t=10,b=0),barmode="overlay",
+        margin=dict(l=0,r=0,t=10,b=0),barmode="group",
         legend=dict(orientation="h",yanchor="bottom",y=1.01,font_size=11),
         yaxis_title="GWh",hovermode="x unified",
         xaxis=dict(showgrid=False),yaxis=dict(gridcolor="#F1F5F9"))
@@ -299,18 +306,47 @@ def page_areas():
                   "border":f"0.5px solid {COLORS['border']}","borderLeft":f"4px solid {color}"}))
 
     trend = rk.groupby(["fecha","area"])["kwh_real"].sum().reset_index()
-    fig = go.Figure()
-    for area in areas_all:
-        d = trend[trend["area"]==area].sort_values("fecha")
-        fig.add_trace(go.Scatter(x=d["fecha"],y=d["kwh_real"]/1e3,name=area,mode="lines",
-            line=dict(color=AREA_COLORS.get(area,"#94A3B8"),width=2),
-            hovertemplate=f"<b>{area}</b><br>%{{x|%b %Y}}<br>%{{y:,.0f}} MWh<extra></extra>"))
-    fig.update_layout(
-        plot_bgcolor="#FFFFFF",paper_bgcolor="#FFFFFF",height=320,
-        margin=dict(l=0,r=0,t=10,b=0),
-        legend=dict(orientation="h",yanchor="bottom",y=1.01),
-        yaxis_title="MWh",hovermode="x unified",
-        xaxis=dict(showgrid=False),yaxis=dict(gridcolor="#F1F5F9"))
+    trend_bk = bk.groupby(["fecha","area"])["kwh_ppto"].sum().reset_index()
+
+    def make_area_fig(df, val_col, areas_list, chart_type="stack"):
+        fig = go.Figure()
+        for area in areas_list:
+            d = df[df["area"]==area].sort_values("fecha")
+            color = AREA_COLORS.get(area,"#94A3B8")
+            fig.add_trace(go.Bar(x=d["fecha"],y=d[val_col]/1e3,name=area,
+                marker_color=color,opacity=0.85,
+                hovertemplate=f"<b>{area}</b><br>%{{x|%b %Y}}<br>%{{y:,.0f}} MWh<extra></extra>"))
+        fig.update_layout(barmode="stack" if chart_type=="stack" else "group",
+            plot_bgcolor="#FFFFFF",paper_bgcolor="#FFFFFF",height=320,
+            margin=dict(l=0,r=0,t=10,b=0),
+            legend=dict(orientation="h",yanchor="bottom",y=1.01),
+            yaxis_title="MWh",hovermode="x unified",
+            xaxis=dict(showgrid=False),yaxis=dict(gridcolor="#F1F5F9"))
+        return fig
+
+    def make_comp_fig(areas_list):
+        fig = go.Figure()
+        for area in areas_list:
+            color = AREA_COLORS.get(area,"#94A3B8")
+            dp = trend_bk[trend_bk["area"]==area].sort_values("fecha")
+            dr = trend[trend["area"]==area].sort_values("fecha")
+            fig.add_trace(go.Scatter(x=dp["fecha"],y=dp["kwh_ppto"]/1e3,
+                name=f"{area} PPTO",mode="lines",
+                line=dict(color=color,dash="dot",width=1.5),legendgroup=area))
+            fig.add_trace(go.Scatter(x=dr["fecha"],y=dr["kwh_real"]/1e3,
+                name=f"{area} Real",mode="lines+markers",
+                line=dict(color=color,width=2.5),marker_size=4,legendgroup=area))
+        fig.update_layout(plot_bgcolor="#FFFFFF",paper_bgcolor="#FFFFFF",height=380,
+            margin=dict(l=0,r=0,t=10,b=0),
+            legend=dict(orientation="h",yanchor="bottom",y=1.01,font_size=10),
+            yaxis_title="MWh",hovermode="x unified",
+            xaxis=dict(showgrid=False),yaxis=dict(gridcolor="#F1F5F9"))
+        return fig
+
+    fig_real = make_area_fig(trend,"kwh_real",areas_all)
+    fig_ppto = make_area_fig(trend_bk,"kwh_ppto",areas_all)
+    fig_comp = make_comp_fig(areas_all)
+    fig = fig_real
 
     latest = rk["fecha"].max()
     tree = rk[rk["fecha"]==latest].copy()
@@ -322,10 +358,27 @@ def page_areas():
     return html.Div([
         section_hd("layers","Desglose por área operativa"),
         html.Div(kpis, style={"display":"flex","gap":"8px","marginBottom":"14px","flexWrap":"wrap"}),
-        section_hd("trending-up","Evolución mensual real por área"),
-        html.Div(dcc.Graph(figure=fig,config={"displayModeBar":False}),
-                 style={"background":COLORS["card"],"borderRadius":"10px","padding":"14px",
-                        "border":f"0.5px solid {COLORS['border']}","marginBottom":"12px"}),
+        section_hd("trending-up","Consumo real por área — evolución mensual"),
+        dcc.Tabs([
+            dcc.Tab(label="Real", children=[
+                html.Div(dcc.Graph(figure=fig_real,config={"displayModeBar":False}),
+                    style={"background":COLORS["card"],"borderRadius":"10px","padding":"14px",
+                           "border":f"0.5px solid {COLORS['border']}"})
+            ], style={"color":COLORS["muted"],"fontWeight":"600"},
+               selected_style={"color":COLORS["accent"],"fontWeight":"700","borderTop":f"3px solid {COLORS['accent']}"}),
+            dcc.Tab(label="Presupuesto", children=[
+                html.Div(dcc.Graph(figure=fig_ppto,config={"displayModeBar":False}),
+                    style={"background":COLORS["card"],"borderRadius":"10px","padding":"14px",
+                           "border":f"0.5px solid {COLORS['border']}"})
+            ], style={"color":COLORS["muted"],"fontWeight":"600"},
+               selected_style={"color":COLORS["accent"],"fontWeight":"700","borderTop":f"3px solid {COLORS['accent']}"}),
+            dcc.Tab(label="Comparación Real vs PPTO", children=[
+                html.Div(dcc.Graph(figure=fig_comp,config={"displayModeBar":False}),
+                    style={"background":COLORS["card"],"borderRadius":"10px","padding":"14px",
+                           "border":f"0.5px solid {COLORS['border']}"})
+            ], style={"color":COLORS["muted"],"fontWeight":"600"},
+               selected_style={"color":COLORS["accent"],"fontWeight":"700","borderTop":f"3px solid {COLORS['accent']}"}),
+        ], style={"marginBottom":"12px"}),
         section_hd("chart-area","Distribución — último mes"),
         html.Div(dcc.Graph(figure=fig_tree,config={"displayModeBar":False}),
                  style={"background":COLORS["card"],"borderRadius":"10px","padding":"14px",
@@ -370,6 +423,16 @@ def page_factura():
         margin=dict(l=0,r=0,t=10,b=0),yaxis_title="USD/MWh",
         xaxis=dict(showgrid=False),yaxis=dict(gridcolor="#F1F5F9"))
 
+    # Donut distribution
+    dist = bill.groupby("area")["usd"].sum().reset_index()
+    dist = dist[dist["usd"]>0].sort_values("usd",ascending=False)
+    fig_donut = go.Figure(go.Pie(
+        labels=dist["area"],values=dist["usd"],hole=0.55,
+        marker_colors=[AREA_COLORS.get(a,"#94A3B8") for a in dist["area"]],
+        textinfo="label+percent",textfont_size=11))
+    fig_donut.update_layout(paper_bgcolor="#FFFFFF",height=280,
+        margin=dict(l=0,r=0,t=10,b=0),showlegend=False)
+
     return html.Div([
         section_hd("coin","Facturación energética"),
         html.Div([
@@ -378,14 +441,87 @@ def page_factura():
             kpi_card("Promedio mensual",f"${prom_mo/1e6:.2f}M","USD",accent="#9333EA"),
             kpi_card("Costo unitario prom",f"${avg:.1f}","USD/MWh",accent="#C0392B"),
         ],style={"display":"flex","gap":"10px","marginBottom":"14px"}),
-        section_hd("chart-bar","Evolución mensual por área"),
-        html.Div(dcc.Graph(figure=fig,config={"displayModeBar":False}),
-                 style={"background":COLORS["card"],"borderRadius":"10px","padding":"14px",
-                        "border":f"0.5px solid {COLORS['border']}","marginBottom":"12px"}),
-        section_hd("currency-dollar","Costo unitario USD/MWh"),
-        html.Div(dcc.Graph(figure=fig2,config={"displayModeBar":False}),
-                 style={"background":COLORS["card"],"borderRadius":"10px","padding":"14px",
-                        "border":f"0.5px solid {COLORS['border']}"}),
+        dcc.Tabs([
+            dcc.Tab(label="Evolución mensual", children=[
+                html.Div(dcc.Graph(figure=fig,config={"displayModeBar":False}),
+                    style={"background":COLORS["card"],"borderRadius":"10px","padding":"14px",
+                           "border":f"0.5px solid {COLORS['border']}"})
+            ], style={"color":COLORS["muted"],"fontWeight":"600"},
+               selected_style={"color":COLORS["accent"],"fontWeight":"700","borderTop":f"3px solid {COLORS['accent']}"}),
+            dcc.Tab(label="Distribución por área", children=[
+                html.Div([
+                    html.Div(dcc.Graph(figure=fig_donut,config={"displayModeBar":False}),style={"flex":"1"}),
+                    html.Div([
+                        html.Div([
+                            html.Div(row["area"],style={"fontWeight":"700","fontSize":"13px","color":COLORS["text"]}),
+                            html.Div(f"${row['usd']/1e6:.2f}M ({row['usd']/dist['usd'].sum()*100:.1f}%)",
+                                     style={"fontSize":"12px","color":COLORS["muted"]}),
+                            html.Hr(style={"margin":"6px 0","borderColor":"#F1F5F9"}),
+                        ]) for _,row in dist.iterrows()
+                    ],style={"flex":"1","padding":"14px"}),
+                ],style={"display":"flex","background":COLORS["card"],"borderRadius":"10px",
+                         "border":f"0.5px solid {COLORS['border']}"})
+            ], style={"color":COLORS["muted"],"fontWeight":"600"},
+               selected_style={"color":COLORS["accent"],"fontWeight":"700","borderTop":f"3px solid {COLORS['accent']}"}),
+            dcc.Tab(label="Costo unitario USD/MWh", children=[
+                html.Div(dcc.Graph(figure=fig2,config={"displayModeBar":False}),
+                    style={"background":COLORS["card"],"borderRadius":"10px","padding":"14px",
+                           "border":f"0.5px solid {COLORS['border']}"})
+            ], style={"color":COLORS["muted"],"fontWeight":"600"},
+               selected_style={"color":COLORS["accent"],"fontWeight":"700","borderTop":f"3px solid {COLORS['accent']}"}),
+        ],style={"marginBottom":"12px"}),
+    ])
+
+
+# ── Page: LOM ────────────────────────────────────────────────────────────────
+def page_lom():
+    import re as re_module
+    RATIO_COL_MAP = {
+        8:"23m1",9:"23m2",10:"23m3",11:"23m4",12:"23m5",13:"23m6",
+        14:"23m7",15:"23m8",16:"23m9",17:"23m10",18:"23m11",19:"23m12",
+        22:"24m1",23:"24m2",24:"24m3",25:"24m4",26:"24m5",27:"24m6",
+        28:"24m7",29:"24m8",30:"24m9",31:"24m10",32:"24m11",33:"24m12",
+        36:"25m1",37:"25m2",38:"25m3",39:"25m4",40:"25m5",41:"25m6",
+        42:"25m7",43:"25m8",44:"25m9",45:"25m10",46:"25m11",47:"25m12",
+        50:"26m1",51:"26m2",52:"26m3",53:"26m4",54:"26m5",55:"26m6",
+        56:"26m7",57:"26m8",58:"26m9",59:"26m10",60:"26m11",61:"26m12",
+        78:"27m1",79:"27m2",80:"27m3",81:"27m4",82:"27m5",83:"27m6",
+        84:"27m7",85:"27m8",86:"27m9",87:"27m10",88:"27m11",89:"27m12",
+        92:"28q1",93:"28q2",94:"28q3",95:"28q4",96:"2028",
+        98:"29q1",99:"29q2",100:"29q3",101:"29q4",102:"2029",
+        104:"2030",105:"2031",106:"2032",107:"2033",108:"2034",109:"2035",
+        110:"2036",111:"2037",112:"2038",113:"2039",114:"2040",115:"2041",
+        116:"2042",117:"2043",118:"2044",119:"2045",
+    }
+
+    def period_type(p):
+        p=str(p)
+        if re_module.match(r"\d{2}m\d",p): return "monthly"
+        if re_module.match(r"\d{2}q\d",p): return "quarterly"
+        return "annual"
+
+    PHASE_COLORS = {"monthly":"#1D4ED8","quarterly":"#7C3AED","annual":"#0F766E"}
+    PHASE_LABELS = {"monthly":"Mensual 2023–2027","quarterly":"Trimestral 2028–2029","annual":"Anual 2030–2045"}
+
+    LOM_OPTIONS = [
+        {"label":"Consumo Total (GWh)","value":"kwh_total"},
+        {"label":"Sulfuros (kWh/tt Sulf)","value":"sulf_ratio"},
+        {"label":"Unitario Total (kWh/tt)","value":"unit_ratio"},
+        {"label":"Infraestructura (kWh/m³)","value":"infra_ratio"},
+        {"label":"Óxidos EW (kWh/tt Óxi)","value":"ew_ratio"},
+        {"label":"Óxidos Seco (kWh/tt Óxi)","value":"seco_ratio"},
+    ]
+
+    return html.Div([
+        section_hd("calendar","Horizonte LOM 2023–2045"),
+        html.Div([
+            html.Div("Vista principal",style={"fontSize":"11px","fontWeight":"700",
+                "color":"#94A3B8","marginBottom":"6px"}),
+            dcc.Dropdown(id="lom-selector",options=LOM_OPTIONS,
+                value="sulf_ratio",clearable=False,style={"fontSize":"13px"}),
+        ],style={"background":COLORS["card"],"borderRadius":"10px","padding":"14px",
+                 "border":f"0.5px solid {COLORS['border']}","marginBottom":"12px"}),
+        html.Div(id="lom-content"),
     ])
 
 # ── Layout ────────────────────────────────────────────────────────────────────
@@ -434,6 +570,7 @@ def router(pathname):
         "/ratios":  page_ratios,
         "/areas":   page_areas,
         "/factura": page_factura,
+        "/lom":     page_lom,
     }
     title_text = titles.get(pathname, "⚡ Resumen ejecutivo — Superintendencia de Energía")
     title_el = html.Span(title_text, style={"fontSize":"20px","fontWeight":"700","color":"#FFFFFF"})
@@ -496,6 +633,201 @@ def update_ratio(ratio_key):
                  style={"background":COLORS["card"],"borderRadius":"10px","padding":"14px",
                         "border":f"0.5px solid {COLORS['border']}"}),
     ])
+
+@app.callback(Output("lom-content","children"), Input("lom-selector","value"))
+def update_lom(view):
+    import re as re_mod, openpyxl as oxl
+    BASE = os.path.dirname(os.path.abspath(__file__))
+    df1 = __import__("pandas").read_excel(os.path.join(BASE,"presupuesto_energia.xlsx"),
+        sheet_name="LOM25 Óptimo",header=None)
+
+    RATIO_ROW_MAP = {
+        "sulf_ratio":43,"unit_ratio":21,"infra_ratio":53,
+        "ew_ratio":69,"seco_ratio":58,
+    }
+    KWH_ROWS = {"G&A":86,"Mina":96,"Sulfuros":106,"Infraestructura":116,"Mantenimiento":101,"Óxidos":120}
+    COL_MAP = {
+        8:"23m1",9:"23m2",10:"23m3",11:"23m4",12:"23m5",13:"23m6",
+        14:"23m7",15:"23m8",16:"23m9",17:"23m10",18:"23m11",19:"23m12",
+        22:"24m1",23:"24m2",24:"24m3",25:"24m4",26:"24m5",27:"24m6",
+        28:"24m7",29:"24m8",30:"24m9",31:"24m10",32:"24m11",33:"24m12",
+        36:"25m1",37:"25m2",38:"25m3",39:"25m4",40:"25m5",41:"25m6",
+        42:"25m7",43:"25m8",44:"25m9",45:"25m10",46:"25m11",47:"25m12",
+        50:"26m1",51:"26m2",52:"26m3",53:"26m4",54:"26m5",55:"26m6",
+        56:"26m7",57:"26m8",58:"26m9",59:"26m10",60:"26m11",61:"26m12",
+        78:"27m1",79:"27m2",80:"27m3",81:"27m4",82:"27m5",83:"27m6",
+        84:"27m7",85:"27m8",86:"27m9",87:"27m10",88:"27m11",89:"27m12",
+        92:"28q1",93:"28q2",94:"28q3",95:"28q4",96:"2028",
+        98:"29q1",99:"29q2",100:"29q3",101:"29q4",102:"2029",
+        104:"2030",105:"2031",106:"2032",107:"2033",108:"2034",109:"2035",
+        110:"2036",111:"2037",112:"2038",113:"2039",114:"2040",115:"2041",
+        116:"2042",117:"2043",118:"2044",119:"2045",
+    }
+    pd = __import__("pandas")
+
+    def ptype(p):
+        p=str(p)
+        if re_mod.match(r"\d{2}m\d",p): return "monthly"
+        if re_mod.match(r"\d{2}q\d",p): return "quarterly"
+        return "annual"
+
+    from data_loader import parse_period
+    PHASE_COLORS={"monthly":"#1D4ED8","quarterly":"#7C3AED","annual":"#0F766E"}
+    PHASE_LABELS={"monthly":"Mensual 2023–2027","quarterly":"Trimestral 2028–2029","annual":"Anual 2030–2045"}
+
+    records=[]
+    if view=="kwh_total":
+        for area,row in KWH_ROWS.items():
+            for col,period in COL_MAP.items():
+                if col<df1.shape[1]:
+                    val=pd.to_numeric(df1.iloc[row,col],errors="coerce")
+                    fecha=parse_period(period)
+                    if pd.notna(val) and val>0 and pd.notna(fecha):
+                        records.append({"fecha":fecha,"val":float(val)/1e6,"tipo":ptype(period),"area":area})
+        df_s=pd.DataFrame(records)
+        fig=go.Figure()
+        for phase,color in PHASE_COLORS.items():
+            for area in list(KWH_ROWS.keys()):
+                d=df_s[(df_s["tipo"]==phase)&(df_s["area"]==area)].sort_values("fecha")
+                if not d.empty:
+                    fig.add_trace(go.Scatter(x=d["fecha"],y=d["val"],name=f"{area} {PHASE_LABELS[phase]}",
+                        mode="lines+markers",line=dict(color=AREA_COLORS.get(area,"#94A3B8"),width=2),
+                        marker_size=4,showlegend=True,legendgroup=area))
+        ylabel="GWh"
+    else:
+        row=RATIO_ROW_MAP.get(view,43)
+        for col,period in COL_MAP.items():
+            if col<df1.shape[1]:
+                val=pd.to_numeric(df1.iloc[row,col],errors="coerce")
+                fecha=parse_period(period)
+                if pd.notna(val) and val>0 and pd.notna(fecha):
+                    records.append({"fecha":fecha,"val":float(val),"tipo":ptype(period)})
+        df_s=pd.DataFrame(records).sort_values("fecha")
+        fig=go.Figure()
+        for phase,color in PHASE_COLORS.items():
+            d=df_s[df_s["tipo"]==phase]
+            if not d.empty:
+                fig.add_trace(go.Scatter(x=d["fecha"],y=d["val"],name=PHASE_LABELS[phase],
+                    mode="lines+markers",line=dict(color=color,width=2.5),marker_size=5))
+        ylabel="kWh/unidad"
+
+    fig.update_layout(plot_bgcolor="#FFFFFF",paper_bgcolor="#FFFFFF",height=420,
+        margin=dict(l=0,r=0,t=20,b=0),
+        legend=dict(orientation="h",yanchor="bottom",y=1.01,font_size=10),
+        yaxis_title=ylabel,hovermode="x unified",
+        xaxis=dict(showgrid=False,rangeslider=dict(visible=True)),
+        yaxis=dict(gridcolor="#F1F5F9"))
+
+    # Add phase shading
+    fig.add_vrect(x0="2023-01-01",x1="2027-12-31",fillcolor="rgba(29,78,216,0.04)",
+        layer="below",line_width=0,annotation_text="Mensual",annotation_position="top left",
+        annotation_font_size=10,annotation_font_color="#1D4ED8")
+    fig.add_vrect(x0="2028-01-01",x1="2029-12-31",fillcolor="rgba(124,58,237,0.04)",
+        layer="below",line_width=0,annotation_text="Trimestral",annotation_position="top left",
+        annotation_font_size=10,annotation_font_color="#7C3AED")
+    fig.add_vrect(x0="2030-01-01",x1="2046-01-01",fillcolor="rgba(15,118,110,0.04)",
+        layer="below",line_width=0,annotation_text="Anual",annotation_position="top left",
+        annotation_font_size=10,annotation_font_color="#0F766E")
+
+    return html.Div(dcc.Graph(figure=fig,config={"displayModeBar":True}),
+        style={"background":COLORS["card"],"borderRadius":"10px","padding":"14px",
+               "border":f"0.5px solid {COLORS['border']}"})
+
+
+@app.callback(Output("lom-content","children"), Input("lom-selector","value"))
+def update_lom(view):
+    import re as re_mod
+    import pandas as pd
+    BASE = os.path.dirname(os.path.abspath(__file__))
+    df1 = pd.read_excel(os.path.join(BASE,"presupuesto_energia.xlsx"),
+        sheet_name="LOM25 Optimo",header=None)
+
+    RATIO_ROW_MAP = {"sulf_ratio":43,"unit_ratio":21,"infra_ratio":53,"ew_ratio":69,"seco_ratio":58}
+    KWH_ROWS = {"G&A":86,"Mina":96,"Sulfuros":106,"Infraestructura":116,"Mantenimiento":101,"Oxidos":120}
+    COL_MAP = {
+        8:"23m1",9:"23m2",10:"23m3",11:"23m4",12:"23m5",13:"23m6",
+        14:"23m7",15:"23m8",16:"23m9",17:"23m10",18:"23m11",19:"23m12",
+        22:"24m1",23:"24m2",24:"24m3",25:"24m4",26:"24m5",27:"24m6",
+        28:"24m7",29:"24m8",30:"24m9",31:"24m10",32:"24m11",33:"24m12",
+        36:"25m1",37:"25m2",38:"25m3",39:"25m4",40:"25m5",41:"25m6",
+        42:"25m7",43:"25m8",44:"25m9",45:"25m10",46:"25m11",47:"25m12",
+        50:"26m1",51:"26m2",52:"26m3",53:"26m4",54:"26m5",55:"26m6",
+        56:"26m7",57:"26m8",58:"26m9",59:"26m10",60:"26m11",61:"26m12",
+        78:"27m1",79:"27m2",80:"27m3",81:"27m4",82:"27m5",83:"27m6",
+        84:"27m7",85:"27m8",86:"27m9",87:"27m10",88:"27m11",89:"27m12",
+        92:"28q1",93:"28q2",94:"28q3",95:"28q4",
+        98:"29q1",99:"29q2",100:"29q3",101:"29q4",
+        104:"2030",105:"2031",106:"2032",107:"2033",108:"2034",109:"2035",
+        110:"2036",111:"2037",112:"2038",113:"2039",114:"2040",115:"2041",
+        116:"2042",117:"2043",118:"2044",119:"2045",
+    }
+
+    def ptype(p):
+        p=str(p)
+        if re_mod.match(r"\d{2}m\d",p): return "monthly"
+        if re_mod.match(r"\d{2}q\d",p): return "quarterly"
+        return "annual"
+
+    from data_loader import parse_period
+    PHASE_COLORS={"monthly":"#1D4ED8","quarterly":"#7C3AED","annual":"#0F766E"}
+    PHASE_LABELS={"monthly":"Mensual 2023-2027","quarterly":"Trimestral 2028-2029","annual":"Anual 2030-2045"}
+
+    records=[]
+    if view=="kwh_total":
+        for area,row in KWH_ROWS.items():
+            for col,period in COL_MAP.items():
+                if col<df1.shape[1]:
+                    val=pd.to_numeric(df1.iloc[row,col],errors="coerce")
+                    fecha=parse_period(period)
+                    if pd.notna(val) and val>0 and pd.notna(fecha):
+                        records.append({"fecha":fecha,"val":float(val)/1e6,"tipo":ptype(period),"area":area})
+        df_s=pd.DataFrame(records)
+        fig=go.Figure()
+        shown=set()
+        for area in list(KWH_ROWS.keys()):
+            d=df_s[df_s["area"]==area].sort_values("fecha")
+            if not d.empty:
+                color=AREA_COLORS.get(area,"#94A3B8")
+                fig.add_trace(go.Scatter(x=d["fecha"],y=d["val"],name=area,
+                    mode="lines+markers",line=dict(color=color,width=2),marker_size=4))
+        ylabel="GWh"
+    else:
+        row=RATIO_ROW_MAP.get(view,43)
+        for col,period in COL_MAP.items():
+            if col<df1.shape[1]:
+                val=pd.to_numeric(df1.iloc[row,col],errors="coerce")
+                fecha=parse_period(period)
+                if pd.notna(val) and val>0 and pd.notna(fecha):
+                    records.append({"fecha":fecha,"val":float(val),"tipo":ptype(period)})
+        df_s=pd.DataFrame(records).sort_values("fecha")
+        fig=go.Figure()
+        for phase,color in PHASE_COLORS.items():
+            d=df_s[df_s["tipo"]==phase]
+            if not d.empty:
+                fig.add_trace(go.Scatter(x=d["fecha"],y=d["val"],name=PHASE_LABELS[phase],
+                    mode="lines+markers",line=dict(color=color,width=2.5),marker_size=5))
+        ylabel="kWh/unidad"
+
+    fig.update_layout(plot_bgcolor="#FFFFFF",paper_bgcolor="#FFFFFF",height=420,
+        margin=dict(l=0,r=0,t=30,b=0),
+        legend=dict(orientation="h",yanchor="bottom",y=1.01,font_size=10),
+        yaxis_title=ylabel,hovermode="x unified",
+        xaxis=dict(showgrid=False,rangeslider=dict(visible=True)),
+        yaxis=dict(gridcolor="#F1F5F9"))
+
+    fig.add_vrect(x0="2023-01-01",x1="2027-12-31",fillcolor="rgba(29,78,216,0.04)",
+        layer="below",line_width=0,annotation_text="Mensual",
+        annotation_position="top left",annotation_font_size=10,annotation_font_color="#1D4ED8")
+    fig.add_vrect(x0="2028-01-01",x1="2029-12-31",fillcolor="rgba(124,58,237,0.04)",
+        layer="below",line_width=0,annotation_text="Trimestral",
+        annotation_position="top left",annotation_font_size=10,annotation_font_color="#7C3AED")
+    fig.add_vrect(x0="2030-01-01",x1="2046-01-01",fillcolor="rgba(15,118,110,0.04)",
+        layer="below",line_width=0,annotation_text="Anual",
+        annotation_position="top left",annotation_font_size=10,annotation_font_color="#0F766E")
+
+    return html.Div(dcc.Graph(figure=fig,config={"displayModeBar":True}),
+        style={"background":COLORS["card"],"borderRadius":"10px","padding":"14px",
+               "border":f"0.5px solid {COLORS['border']}"})
 
 if __name__ == "__main__":
     app.run(debug=False, host="0.0.0.0", port=int(os.environ.get("PORT", 8050)))
