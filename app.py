@@ -79,8 +79,7 @@ def make_sidebar():
                    "display":"flex","alignItems":"center","padding":"8px 12px",
                    "borderRadius":"8px","color":"#94A3B8","textDecoration":"none",
                    "fontSize":"13px","marginBottom":"4px","fontWeight":"500",
-               },
-               className="nav-link-item")
+               })
         )
     return html.Div([
         html.Div([
@@ -575,7 +574,13 @@ def router(pathname):
     title_text = titles.get(pathname, "⚡ Resumen ejecutivo — Superintendencia de Energía")
     title_el = html.Span(title_text, style={"fontSize":"20px","fontWeight":"700","color":"#FFFFFF"})
     page_fn = pages.get(pathname, page_home)
-    return page_fn(), title_el
+    try:
+        return page_fn(), title_el
+    except Exception as e:
+        return html.Div([
+            html.H3("Error cargando página", style={"color":"#EF4444","fontWeight":"700"}),
+            html.Pre(str(e), style={"color":"#F87171","fontSize":"12px","background":"#1E293B","padding":"12px","borderRadius":"8px"}),
+        ]), title_el
 
 @app.callback(Output("ratio-content","children"),
               Input("ratio-selector","value"))
@@ -740,7 +745,7 @@ def update_lom(view):
     import pandas as pd
     BASE = os.path.dirname(os.path.abspath(__file__))
     df1 = pd.read_excel(os.path.join(BASE,"presupuesto_energia.xlsx"),
-        sheet_name="LOM25 Optimo",header=None)
+        sheet_name="LOM25 Óptimo",header=None)
 
     RATIO_ROW_MAP = {"sulf_ratio":43,"unit_ratio":21,"infra_ratio":53,"ew_ratio":69,"seco_ratio":58}
     KWH_ROWS = {"G&A":86,"Mina":96,"Sulfuros":106,"Infraestructura":116,"Mantenimiento":101,"Oxidos":120}
